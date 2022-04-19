@@ -1,2 +1,3 @@
-# acsbm
-Spectral clustering on the additive-covariate stochastic block model
+# Additive-Covariate Stochastic Block Model (`acsbm`)
+
+more details coming soon!
