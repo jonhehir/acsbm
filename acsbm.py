@@ -194,6 +194,18 @@ class GeneratedNetwork:
     block_sizes: list[int]
     model: MultiCovariateModel
 
+    @property
+    def n_blocks(self) -> int:
+        return len(self.block_sizes)
+
+    @property
+    def n_nodes(self) -> int:
+        return self.A.shape[0]
+    
+    @property
+    def n_edges(self) -> int:
+        return self.A.count_nonzero()
+
 
 def generate_sparse_block(size, prob, symmetric=False):
     """
@@ -351,6 +363,9 @@ def invert_matching(matching):
     return [x[0] for x in sorted(enumerate(matching), key=lambda x: x[1])]
 
 def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> NetworkEstimationResult:
+    """
+    Estimate B matrix and coefficients of ACSBM model (assuming simple covariates only) via GLM
+    """
     theta_tilde = cluster_result.theta_tilde
     n_blocks = max(theta_tilde) + 1
     est_block_sizes = Counter(theta_tilde)
