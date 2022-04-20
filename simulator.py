@@ -17,6 +17,11 @@ import acsbm
 # ignore DomainWarnings
 warnings.simplefilter("ignore", DomainWarning)
 
+# We're outputting tab-delimited data with columns for each covariate.
+# To ensure we always have the same number of columns, we'll pad with
+# blanks up to MAX_COVARIATES when the actual number of covariates is smaller.
+MAX_COVARIATES = 5
+
 @dataclass
 class SimulationSetting:
     base_model: acsbm.MultiCovariateModel
@@ -150,9 +155,12 @@ def run_simulation(name: str, n: int):
     e_time = timer() - start
 
     data = [name, datetime.datetime.now(), setting.hash(), setting.sparsity, n, net.n_edges, c_time, e_time, accuracy]
-    for i in range(len(model.covariates)):
+    n_covariates = len(model.covariates)
+    for i in range(n_covariates):
         data.append(model.covariates[i].beta_matrix[0, 0])
         data.append(e_result.coefficients[i])
+    blanks = [''] * (MAX_COVARIATES - n_covariates) * 2
+    data.extend(blanks)
     
     return data
 
