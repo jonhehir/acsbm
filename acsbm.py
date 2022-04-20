@@ -250,7 +250,7 @@ def generate_network(model: MultiCovariateModel, ndd: NodeDataDistribution, n: i
     counts = Counter(theta_tilde)
     block_sizes = [counts[i] for i in range(model.n_communities * L_tilde)]
 
-    # TODO: this doesn't belong here
+    # This could probably be handled more gracefully...
     if len(counts.keys()) < model.n_communities * L_tilde:
         raise NetworkTooSmallError("Generated network does not have a node of every type. Consider using a larger n.")
 
@@ -421,8 +421,10 @@ def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> Net
             row += 1
 
     # Step 3: Fit GLM to estimate coefficients
+    non_empty = np.sum(response[:,], axis=1) > 0
     model = sm_GLM(
-        response, np.hstack([base_block_indicators, covariate_indicators]),
+        response[non_empty, :],
+        np.hstack([base_block_indicators, covariate_indicators])[non_empty, :],
         family=sm_families.Binomial(link=net.model.link._statsmodels_link)
     )
     results = model.fit()
