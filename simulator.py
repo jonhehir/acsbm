@@ -9,7 +9,6 @@ from timeit import default_timer as timer
 import warnings
 
 import numpy as np
-from sklearn.decomposition import non_negative_factorization
 from statsmodels.tools.sm_exceptions import DomainWarning
 
 import acsbm
