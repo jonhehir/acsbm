@@ -194,6 +194,18 @@ class GeneratedNetwork:
     block_sizes: list[int]
     model: MultiCovariateModel
 
+    @property
+    def n_blocks(self) -> int:
+        return len(self.block_sizes)
+
+    @property
+    def n_nodes(self) -> int:
+        return self.A.shape[0]
+    
+    @property
+    def n_edges(self) -> int:
+        return self.A.count_nonzero()
+
 
 def generate_sparse_block(size, prob, symmetric=False):
     """
@@ -238,7 +250,7 @@ def generate_network(model: MultiCovariateModel, ndd: NodeDataDistribution, n: i
     counts = Counter(theta_tilde)
     block_sizes = [counts[i] for i in range(model.n_communities * L_tilde)]
 
-    # TODO: this doesn't belong here
+    # This could probably be handled more gracefully...
     if len(counts.keys()) < model.n_communities * L_tilde:
         raise NetworkTooSmallError("Generated network does not have a node of every type. Consider using a larger n.")
 
@@ -351,6 +363,9 @@ def invert_matching(matching):
     return [x[0] for x in sorted(enumerate(matching), key=lambda x: x[1])]
 
 def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> NetworkEstimationResult:
+    """
+    Estimate B matrix and coefficients of ACSBM model (assuming simple covariates only) via GLM
+    """
     theta_tilde = cluster_result.theta_tilde
     n_blocks = max(theta_tilde) + 1
     est_block_sizes = Counter(theta_tilde)
@@ -406,8 +421,10 @@ def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> Net
             row += 1
 
     # Step 3: Fit GLM to estimate coefficients
+    non_empty = np.sum(response[:,], axis=1) > 0
     model = sm_GLM(
-        response, np.hstack([base_block_indicators, covariate_indicators]),
+        response[non_empty, :],
+        np.hstack([base_block_indicators, covariate_indicators])[non_empty, :],
         family=sm_families.Binomial(link=net.model.link._statsmodels_link)
     )
     results = model.fit()
