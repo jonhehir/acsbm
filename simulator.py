@@ -145,8 +145,11 @@ def run_simulation(name: str, n: int):
         return None
     
     start = timer()
-    c_result = acsbm.cluster(net, model.n_communities, net.n_blocks)
-    c_time = timer() - start
+    ic_result = acsbm.initial_cluster(net, model.n_communities, net.n_blocks)
+    mid = timer()
+    c_result = acsbm.reconcile_clusters(net, ic_result)
+    c1_time = mid - start
+    c2_time = timer() - mid
     
     accuracy = acsbm.label_accuracy(net.theta, c_result.theta)
 
@@ -154,7 +157,7 @@ def run_simulation(name: str, n: int):
     e_result = acsbm.estimate(net, c_result)
     e_time = timer() - start
 
-    data = [name, datetime.datetime.now(), setting.hash(), setting.sparsity, n, net.n_edges, c_time, e_time, accuracy]
+    data = [name, datetime.datetime.now(), setting.hash(), setting.sparsity, n, net.n_edges, c1_time, c2_time, e_time, accuracy]
     n_covariates = len(model.covariates)
     for i in range(n_covariates):
         data.append(model.covariates[i].beta_matrix[0, 0])

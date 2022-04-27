@@ -1,11 +1,11 @@
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 import functools
 import itertools
 from typing import Any, Iterable
 
 import numpy as np
-from scipy import optimize, sparse, spatial, stats
+from scipy import linalg, optimize, sparse, spatial, stats
 from sklearn import metrics
 from sklearn.mixture import GaussianMixture
 import statsmodels.genmod.families as sm_families
@@ -265,116 +265,227 @@ def generate_network(model: MultiCovariateModel, ndd: NodeDataDistribution, n: i
 
 
 @dataclass
-class NetworkClusterResult:
-    n_communities: int
-    theta: list[int]
+class NetworkInitialClusterResult:
+    k: int
+    partitions: dict[int, list[int]]
+    labels: dict[int, list[int]]
     theta_tilde: list[int]
 
 
 @dataclass
+class NetworkClusterResult:
+    k: int
+    theta: list[int]
+    theta_tilde: list[int]
+    B_tilde: np.ndarray
+
+
+@dataclass
 class NetworkEstimationResult:
-    B_star: np.ndarray
     B_hat: np.ndarray
     coefficients: np.ndarray
 
 
-def cluster(net: GeneratedNetwork, k: int, d: int, ignore_covariates: bool = False) -> NetworkClusterResult:
+def count_connections(A: Any, memberships: list[int], dtype: Any = int) -> np.ndarray:
     """
-    Cluster ACSBM by separately clustering each covariate configuration, then matching clusterings
+    Count the number of connections, broken down by block memberships
+
+    This is primarily used to estimate B_tilde.
 
     Params:
-    k: number of latent communities
-    d: embedding dimension
-    ignore_covariates: if True, estimates theta as one would without covariates (single-round, no matching)
 
-    Note: `ignore_covariates` only affects estimation of `theta`. `theta_tilde` will
-    still reflect covariate differences, but it will do so based on the naive 
-    estimation of `theta`.
+    - `A`: sparse adjacency matrix
+    - `memberships`: 0-indexed block memberships (e.g., theta_tilde)
+    - `dtype` (optional): dtype to return (default: `int`)
+    """
+    n_blocks = max(memberships) + 1
+    counts = np.zeros((n_blocks, n_blocks), dtype=dtype)
+    
+    for idx_1, idx_2 in zip(*A.nonzero()):
+        if idx_1 > idx_2:
+            continue # don't double-count edges!
+
+        t1, t2 = memberships[idx_1], memberships[idx_2]
+        counts[min(t1, t2), max(t1, t2)] += 1
+
+    return np.maximum(counts, counts.T) # symmetrize, since lower triangle is zero
+
+def count_dyads(memberships: list[int], dtype: Any = int) -> np.ndarray:
+    """
+    Calculate the dyad counts for each pair of blocks.
+
+    Params:
+
+    - `memberships`: 0-indexed block memberships (e.g., theta_tilde)
+    - `dtype` (optional): dtype to return (default: `int`)
+    """
+    n_blocks = max(memberships) + 1
+    est_block_sizes = Counter(memberships)
+    
+    counts = np.zeros((n_blocks, n_blocks), dtype=dtype)
+
+    # 1 <= i <= j <= n_blocks
+    for i in range(n_blocks):
+        for j in range(i, n_blocks):
+            if i == j:
+                # on-diagonal block: (n choose 2) dyads
+                counts[i, j] = est_block_sizes[i] * (est_block_sizes[i] - 1) // 2
+            else:
+                # off-digonal block: (m x n) dyads
+                counts[i, j] = est_block_sizes[i] * est_block_sizes[j]
+
+    return np.maximum(counts, counts.T) # symmetrize, since lower triangle is zero
+
+def scaled_embeddings(M: Any, d: int = None) -> np.ndarray:
+    """
+    Return scaled embeddings (of dimension `d`) from matrix `M`
+
+    `M` can be a sparse adjacency matrix or a dense estimate of SBM probabilities (e.g., `B_tilde`)
+
+    If `d` is not specified, `M.shape[0]` is used.
+    """
+    if d is None:
+        l, U = linalg.eigh(M)
+    else:
+        l, U = sparse.linalg.eigsh(M, d)
+    return np.multiply(np.abs(l)**0.5, U)
+
+def initial_cluster(net: GeneratedNetwork, k: int, d: int) -> NetworkInitialClusterResult:
+    """
+    ACSBM Clustering Part 1:
+    Recover theta_tilde (up to a permutation)
+
+    Params:
+
+    - `net`: generated network
+    - `k`: number of latent communities
+    - `d`: embedding dimension
     """
     # recode covariate:
     # (Within the context of this function, we pretend it's just a flattened covariate.
-    # If `ignore_covariates` is `True`, we further assume the flattened covariate is a constant.)
-    if ignore_covariates:
-        Z = np.zeros_like(net.Z_tilde)
-    else:
-        Z = net.Z_tilde
-    zmax = max(Z)
+    Z = net.Z_tilde
+    n_z = max(Z) + 1
 
     # get embeddings
-    l, U = sparse.linalg.eigsh(net.A, d)
-    X = np.multiply(np.abs(l)**0.5, U)
+    X = scaled_embeddings(net.A, d)
 
-    # partition nodes by covariate value, cluster by partition
-    S = []
-    clusters = []
-    labels = []
-    for i in range(zmax + 1):
-        S.append([j for j in range(len(Z)) if Z[j] == i])
-        clusters.append(GaussianMixture(n_components=k).fit(X[S[i],:]))
-        labels.append(clusters[i].predict(X[S[i],:]))
+    # partition nodes by covariate
+    S = defaultdict(list)
+    for i in range(len(Z)):
+        S[Z[i]].append(i)
+
+    # cluster per covariate level
+    # also: build initial theta_tilde (arbitrary order)
+    labels = {}
+    theta_tilde = [0 for _ in range(len(Z))]
+    for z in range(n_z):
+        clusters = GaussianMixture(n_components=k).fit(X[S[z],:])
+        labels[z] = clusters.predict(X[S[z],:])
+
+        for i_S, i_Z in enumerate(S[z]):
+            theta_tilde[i_Z] = tuple_id((labels[z][i_S], z), (k, n_z))
+
+    return NetworkInitialClusterResult(
+        k=k,
+        partitions=S,
+        labels=labels,
+        theta_tilde=theta_tilde
+    )
+
+def reconcile_clusters(net: GeneratedNetwork, initial_cluster: NetworkInitialClusterResult) -> NetworkClusterResult:
+    """
+    ACSBM Clustering Parts 2 and 3:    
+    Given an initial clustering (which separately clusters over the partitioned network),
+    reconcile clusterings into a single set of clusters
+    """
+    Z = net.Z_tilde
+    n_z = max(Z) + 1
+    k, S, labels = initial_cluster.k, initial_cluster.partitions, initial_cluster.labels
+    theta_tilde = initial_cluster.theta_tilde
+
+    # estimate B_tilde, X_B
+    B_tilde = count_connections(net.A, theta_tilde, dtype=float)
+    B_tilde /= np.maximum(count_dyads(theta_tilde), 1)
+    X_B = scaled_embeddings(B_tilde)
+    
+    # group estimated positions by covariate
+    positions = []
+    for z in range(n_z):
+        rows = [tuple_id((j, z), (k, n_z)) for j in range(k)]
+        positions.append(X_B[rows,:])
 
     # find optimal matching of clusters, invert to create lookups
-    cluster_map = [invert_matching(m) for m in optimal_matching(clusters)]
+    cluster_map = [invert_permutation(m) for m in optimal_matching(positions)]
 
-    # reconcile labels for final labels
-    theta = [0 for _ in range(len(Z))]
-    for z in range(zmax + 1):
+    # reconcile permutations for final labels
+    reorder = [0 for _ in range(k * len(S))] # old theta_tilde value => sorted theta_tilde value
+    theta = [0 for _ in range(len(Z))] # reconciled labels
+    for z in range(n_z):
+        for j in range(k):
+            theta_tilde_old = tuple_id((j, z), (k, n_z))
+            theta_tilde_new = tuple_id((cluster_map[z][j], z), (k, n_z))
+            reorder[theta_tilde_old] = theta_tilde_new
+
         for i_S, i_Z in enumerate(S[z]):
             theta[i_Z] = cluster_map[z][labels[z][i_S]]
     
-    # theta tilde!
-    theta_tilde = [tuple_id((theta[i], net.Z_tilde[i]), (k, max(net.Z_tilde) + 1)) for i in range(len(theta))]
+    # reorder theta_tilde, B_tilde
+    reorder_inv = invert_permutation(reorder)
+    theta_tilde = [reorder[x] for x in theta_tilde]
+    B_tilde = B_tilde[reorder_inv, :]
+    B_tilde = B_tilde[:, reorder_inv]
     
-    return NetworkClusterResult(n_communities=k, theta=theta, theta_tilde=theta_tilde)
+    return NetworkClusterResult(
+        k=k, theta=theta, theta_tilde=theta_tilde, B_tilde=B_tilde
+    )
 
 
 # O(lk^3 + lk^2d)?
 # distance matrices: O(l k^2 d), where d is dimension
 # assignment: O(l k^3)
-def optimal_matching(clusters):
+def optimal_matching(positions: list[np.ndarray]) -> list[list[int]]:
     """
     Returns a 2D array [matching_1, ... matching_k]:
     Each entry gives indices mapping the cluster labels from the 0-th level
     to the i-th level
+
+    Params:
+
+    - `positions`: list of position arrays per covariate level
     """
-    l = len(clusters)
-    k = clusters[0].means_.shape[0]
+    l = len(positions)
+    k = positions[0].shape[0]
 
     best_matching = []
     best_matching.append(list(range(k))) # mapping level 0 => level 0 is just the identity
 
     for i in range(1, l):
         _, opt = optimize.linear_sum_assignment(
-            spatial.distance_matrix(clusters[0].means_, clusters[i].means_) ** 2
+            spatial.distance_matrix(positions[0], positions[i]) ** 2
         )
         best_matching.append(opt.tolist())
 
     return best_matching
 
-def invert_matching(matching):
+def invert_permutation(p):
     """
-    A matching [i_1, ... i_k] for a given level l means:
-    j-th community in level 0 is equivalent to community i_j in level l.
-    
-    We want to work our way back from this, so we invert the mapping.
-    The inverted mapping [i'_1, ... i'_k] satisfies:
-    j-th community in level i is equivalent to community i'_j in level 1.
+    Given a permutation p with entries 0..(n-1) in any order,
+    return the permutation p^-1 with entries 0..(n-1) such that
+    p^-1 [ p [i] ] = i for any i in 0..(n-1).
     """
-    return [x[0] for x in sorted(enumerate(matching), key=lambda x: x[1])]
+    return [x[0] for x in sorted(enumerate(p), key=lambda x: x[1])]
 
 def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> NetworkEstimationResult:
     """
     Estimate B matrix and coefficients of ACSBM model (assuming simple covariates only) via GLM
     """
     theta_tilde = cluster_result.theta_tilde
+    n_communities = cluster_result.k
     n_blocks = max(theta_tilde) + 1
-    est_block_sizes = Counter(theta_tilde)
-    n_communities = cluster_result.n_communities
     n_covariates = len(net.model.covariates)
 
-    # for recovering B*
-    dyad_count = np.zeros((n_blocks, n_blocks))
-    connections = np.zeros((n_blocks, n_blocks))
+    dyad_count = count_dyads(theta_tilde)
+    connections = np.rint(cluster_result.B_tilde * dyad_count)
 
     # see from_tuple_id, which maps block index back to (theta, z_1, ... z_P)
     tuple_levels = [n_communities] + [c.n_levels for c in net.model.covariates]
@@ -388,27 +499,11 @@ def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> Net
     B_idx_lookup = { (B_idx[0][i], B_idx[1][i]): i for i in range(n_base_blocks) }
     base_block_indicators = np.zeros((n_block_pairs, n_base_blocks))
 
-    # Step 1: Count connections
-    for idx_1, idx_2 in zip(*net.A.nonzero()):        
-        if idx_1 > idx_2:
-            continue # don't double-count edges!
-
-        t1, t2 = theta_tilde[idx_1], theta_tilde[idx_2]
-        connections[min(t1, t2), max(t1, t2)] += 1
-
-    # Step 2: Build response and indicator matrices for regression
+    # Step 1: Build response and indicator matrices for regression
     # 1 <= i <= j <= n_blocks
     row = 0
     for i in range(n_blocks):
         for j in range(i, n_blocks):
-            # count dyads
-            if i == j:
-                # on-diagonal block: (n choose 2) dyads
-                dyad_count[i, i] = est_block_sizes[i] * (est_block_sizes[i] - 1) // 2
-            else:
-                # off-digonal block: (m x n) dyads
-                dyad_count[i, j] = est_block_sizes[i] * est_block_sizes[j]
-            
             t_i = from_tuple_id(i, tuple_levels)
             t_j = from_tuple_id(j, tuple_levels)
             base_block = (min(t_i[0], t_j[0]), max(t_i[0], t_j[0])) # again, upper triangle commplications
@@ -420,7 +515,7 @@ def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> Net
 
             row += 1
 
-    # Step 3: Fit GLM to estimate coefficients
+    # Step 2: Fit GLM to estimate coefficients
     non_empty = np.sum(response[:,], axis=1) > 0
     model = sm_GLM(
         response[non_empty, :],
@@ -430,17 +525,12 @@ def estimate(net: GeneratedNetwork, cluster_result: NetworkClusterResult) -> Net
     results = model.fit()
     coef = results.params[n_base_blocks:]
 
-    # Step 4: Assemble B_star, the empirical equivalent of B_tilde
-    B_star = connections / np.maximum(dyad_count, 1) # safely divide
-    B_star = np.maximum(B_star, B_star.T) # symmetrize, since lower triangle is zero
-
-    # Step 5: Assemble B_hat, the estimation of B
+    # Step 3: Assemble B_hat, the estimation of B
     B_hat = np.zeros((n_communities, n_communities))
     B_hat[np.triu_indices_from(B_hat)] = results.params[0:n_base_blocks]
     B_hat[np.tril_indices_from(B_hat)] = results.params[0:n_base_blocks][::-1]
 
     return NetworkEstimationResult(
-        B_star=B_star,
         B_hat=B_hat,
         coefficients=coef
     )
