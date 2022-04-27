@@ -11,7 +11,8 @@ import warnings
 import numpy as np
 from statsmodels.tools.sm_exceptions import DomainWarning
 
-import acsbm
+from acsbm import models, generation, estimation
+from acsbm.utils import label_accuracy
 
 
 # ignore DomainWarnings
@@ -24,15 +25,15 @@ MAX_COVARIATES = 5
 
 @dataclass
 class SimulationSetting:
-    base_model: acsbm.MultiCovariateModel
+    base_model: models.MultiCovariateModel
     sparsity: float
-    ndd: acsbm.NodeDataDistribution = None
+    ndd: models.NodeDataDistribution = None
 
     def __post_init__(self):
         if self.ndd is None:
-            self.ndd = acsbm.NodeDataDistribution.uniform_for_model(self.base_model)
+            self.ndd = models.NodeDataDistribution.uniform_for_model(self.base_model)
     
-    def model_at(self, n: int) -> acsbm.MultiCovariateModel:
+    def model_at(self, n: int) -> models.MultiCovariateModel:
         # add log-scale sparsity if called for (do not mutate base_model!)
         if self.sparsity > 0:
             B = np.copy(self.base_model.B)
@@ -62,71 +63,71 @@ class SimulationSetting:
 
 settings = {
     "simpson": SimulationSetting(
-        base_model=acsbm.MultiCovariateModel(
+        base_model=models.MultiCovariateModel(
             B=(3 * np.eye(2) - 5),
-            covariates=[acsbm.Covariate.simple(-0.5, 2)],
-            link=acsbm.LinkFunction.log()
+            covariates=[models.Covariate.simple(-0.5, 2)],
+            link=models.LinkFunction.log()
         ),
-        ndd = acsbm.NodeDataDistribution([[4, 1], [1, 4]]),
+        ndd = models.NodeDataDistribution([[4, 1], [1, 4]]),
         sparsity = 0
     ),
     "nonuniform": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=np.array([
                 [2, 1],
                 [1, 0.2]
             ]) + 1,
-            covariates=[acsbm.Covariate.simple(0.5, 2), acsbm.Covariate.simple(-0.5, 2)],
-            link=acsbm.LinkFunction.logit()
+            covariates=[models.Covariate.simple(0.5, 2), models.Covariate.simple(-0.5, 2)],
+            link=models.LinkFunction.logit()
         ),
         sparsity=0.9
     ),
     "uniform": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=-2 * np.eye(2) + 2,
-            covariates=[acsbm.Covariate.simple(0.5, 2), acsbm.Covariate.simple(-0.5, 2)],
-            link=acsbm.LinkFunction.logit()
+            covariates=[models.Covariate.simple(0.5, 2), models.Covariate.simple(-0.5, 2)],
+            link=models.LinkFunction.logit()
         ),
         sparsity=0.9
     ),
     "big-covariate": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=np.log(.6 * np.eye(2) + 1),
-            covariates=[acsbm.Covariate.simple(4, 2)],
-            link=acsbm.LinkFunction.logit()
+            covariates=[models.Covariate.simple(4, 2)],
+            link=models.LinkFunction.logit()
         ),
         sparsity=0.9
     ),
     "probit-dense": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=-.5 * np.eye(3) - 1,
             covariates=[
-                acsbm.Covariate.simple(-0.7, 2),
-                acsbm.Covariate.simple(0.1, 2)
+                models.Covariate.simple(-0.7, 2),
+                models.Covariate.simple(0.1, 2)
             ],
-            link=acsbm.LinkFunction.probit()
+            link=models.LinkFunction.probit()
         ),
         sparsity = 0
     ),
     "logit-dense": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=-.5 * np.eye(3) - 1,
             covariates=[
-                acsbm.Covariate.simple(-0.7, 2),
-                acsbm.Covariate.simple(0.1, 2)
+                models.Covariate.simple(-0.7, 2),
+                models.Covariate.simple(0.1, 2)
             ],
-            link=acsbm.LinkFunction.logit()
+            link=models.LinkFunction.logit()
         ),
         sparsity = 0
     ),
     "identity-dense": SimulationSetting(
-        base_model = acsbm.MultiCovariateModel(
+        base_model = models.MultiCovariateModel(
             B=-0.1 * np.eye(3) + 0.2,
             covariates=[
-                acsbm.Covariate.simple(0.05, 2),
-                acsbm.Covariate.simple(-0.05, 2)
+                models.Covariate.simple(0.05, 2),
+                models.Covariate.simple(-0.05, 2)
             ],
-            link=acsbm.LinkFunction.identity()
+            link=models.LinkFunction.identity()
         ),
         sparsity = 0
     )
@@ -139,22 +140,22 @@ def run_simulation(name: str, n: int):
     setting = settings[name]
     model = setting.model_at(n)
     try:
-        net = acsbm.generate_network(model, setting.ndd, n)
-    except acsbm.NetworkTooSmallError:
+        net = generation.generate_network(model, setting.ndd, n)
+    except generation.NetworkTooSmallError:
         warnings.warn("Skipping simulation due to NetworkTooSmallError.")
         return None
     
     start = timer()
-    ic_result = acsbm.initial_cluster(net, model.n_communities, net.n_blocks)
+    ic_result = estimation.initial_cluster(net, model.n_communities, net.n_blocks)
     mid = timer()
-    c_result = acsbm.reconcile_clusters(net, ic_result)
+    c_result = estimation.reconcile_clusters(net, ic_result)
     c1_time = mid - start
     c2_time = timer() - mid
     
-    accuracy = acsbm.label_accuracy(net.theta, c_result.theta)
+    accuracy = label_accuracy(net.theta, c_result.theta)
 
     start = timer()
-    e_result = acsbm.estimate(net, c_result)
+    e_result = estimation.estimate(net, c_result)
     e_time = timer() - start
 
     data = [name, datetime.datetime.now(), setting.hash(), setting.sparsity, n, net.n_edges, c1_time, c2_time, e_time, accuracy]
