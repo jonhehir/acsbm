@@ -71,32 +71,24 @@ settings = {
         ndd = models.NodeDataDistribution([[4, 1], [1, 4]]),
         sparsity = 0
     ),
-    "nonuniform": SimulationSetting(
+    "sparse-nonuniform": SimulationSetting(
         base_model = models.MultiCovariateModel(
             B=np.array([
                 [2, 1],
-                [1, 0.2]
-            ]) + 1,
-            covariates=[models.Covariate.simple(0.5, 2), models.Covariate.simple(-0.5, 2)],
-            link=models.LinkFunction.logit()
+                [1, 0.8]
+            ]),
+            covariates=[models.Covariate.simple(1, 2), models.Covariate.simple(-0.5, 2)],
+            link=models.LinkFunction.log()
         ),
-        sparsity=0.9
+        sparsity=0.8
     ),
-    "uniform": SimulationSetting(
+    "sparse-uniform": SimulationSetting(
         base_model = models.MultiCovariateModel(
-            B=-2 * np.eye(2) + 2,
-            covariates=[models.Covariate.simple(0.5, 2), models.Covariate.simple(-0.5, 2)],
-            link=models.LinkFunction.logit()
+            B=-1 * np.eye(2) + 1.5,
+            covariates=[models.Covariate.simple(1, 2), models.Covariate.simple(-0.5, 2)],
+            link=models.LinkFunction.log()
         ),
-        sparsity=0.9
-    ),
-    "big-covariate": SimulationSetting(
-        base_model = models.MultiCovariateModel(
-            B=np.log(.6 * np.eye(2) + 1),
-            covariates=[models.Covariate.simple(4, 2)],
-            link=models.LinkFunction.logit()
-        ),
-        sparsity=0.9
+        sparsity=0.8
     ),
     "probit-dense": SimulationSetting(
         base_model = models.MultiCovariateModel(
@@ -117,6 +109,17 @@ settings = {
                 models.Covariate.simple(0.1, 2)
             ],
             link=models.LinkFunction.logit()
+        ),
+        sparsity = 0
+    ),
+    "log-dense": SimulationSetting(
+        base_model = models.MultiCovariateModel(
+            B=-.5 * np.eye(3) - 1,
+            covariates=[
+                models.Covariate.simple(-0.7, 2),
+                models.Covariate.simple(0.1, 2)
+            ],
+            link=models.LinkFunction.log()
         ),
         sparsity = 0
     ),
