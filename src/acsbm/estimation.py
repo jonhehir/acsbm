@@ -187,10 +187,6 @@ def reconcile_clusters(net: generation.GeneratedNetwork, initial_cluster: Networ
         k=k, theta=theta, theta_tilde=theta_tilde, B_tilde=B_tilde
     )
 
-
-# O(lk^3 + lk^2d)?
-# distance matrices: O(l k^2 d), where d is dimension
-# assignment: O(l k^3)
 def optimal_matching(positions: list[np.ndarray]) -> list[list[int]]:
     """
     Returns a 2D array [matching_1, ... matching_k]:

@@ -98,12 +98,12 @@ class NodeDataDistribution:
     def __init__(self, pmf: np.ndarray):
         self.pmf = pmf / np.sum(pmf) # normalize
 
-    def draw(self, n: int, rng: np.random.Generator = None) -> np.ndarray:
-        if rng is None:
-            rng = np.random.default_rng()
+    def draw(self, n: int, random_state: np.random.Generator = None) -> np.ndarray:
+        if random_state is None:
+            random_state = np.random.default_rng()
 
         all_indices = list(np.ndindex(*self.pmf.shape))
-        data = rng.choice(all_indices, n, p = self.pmf.reshape(len(all_indices),))
+        data = random_state.choice(all_indices, n, p = self.pmf.reshape(len(all_indices),))
         return data[:,0], data[:,1:] # theta, Z
 
     @classmethod
