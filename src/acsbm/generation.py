@@ -34,13 +34,13 @@ class GeneratedNetwork:
         return self.A.count_nonzero()
 
 
-def generate_sparse_block(size, prob, symmetric=False):
+def generate_sparse_block(size, prob, symmetric=False, random_state=None):
     """
     Generates a random block of binary entries where each entry is 1 w.p. prob
     If symmetric=True, returns a symmetric block with a zero on the diagonal.
     """
-    density = stats.binom.rvs(size[0] * size[1], prob, size=1).item() / (size[0] * size[1])
-    m = sparse.random(size[0], size[1], density)
+    density = stats.binom.rvs(size[0] * size[1], prob, size=1, random_state=random_state).item() / (size[0] * size[1])
+    m = sparse.random(size[0], size[1], density, random_state=random_state)
     m.data[:] = 1
     
     if symmetric:
@@ -50,7 +50,7 @@ def generate_sparse_block(size, prob, symmetric=False):
     
     return m
 
-def generate_sparse_sbm(block_sizes, block_probs):
+def generate_sparse_sbm(block_sizes, block_probs, random_state=None):
     """
     Generate a stochastic block model using fixed block sizes and connectivity matrix
     """
@@ -62,15 +62,16 @@ def generate_sparse_sbm(block_sizes, block_probs):
             blocks[i][j] = generate_sparse_block(
                 (block_sizes[i], block_sizes[j]),
                 block_probs[i,j],
-                symmetric=(i == j)
+                symmetric=(i == j),
+                random_state=random_state
             )
             if i < j:
                 blocks[j][i] = blocks[i][j].transpose()
     
     return sparse.bmat(blocks)
 
-def generate_network(model: models.MultiCovariateModel, ndd: models.NodeDataDistribution, n: int):
-    theta, Z = ndd.draw(n)
+def generate_network(model: models.MultiCovariateModel, ndd: models.NodeDataDistribution, n: int, random_state: np.random.RandomState = None) -> GeneratedNetwork:
+    theta, Z = ndd.draw(n, random_state=random_state)
     Z_tilde = model.flatten_Z(Z)
     L_tilde = np.prod([c.n_levels for c in model.covariates])
     theta_tilde = L_tilde * theta + Z_tilde # same as applying tuple_id(...) over rows
@@ -82,7 +83,7 @@ def generate_network(model: models.MultiCovariateModel, ndd: models.NodeDataDist
         raise NetworkTooSmallError("Generated network does not have a node of every type. Consider using a larger n.")
 
     return GeneratedNetwork(
-        A=generate_sparse_sbm(block_sizes, model.B_tilde()),
+        A=generate_sparse_sbm(block_sizes, model.B_tilde(), random_state=random_state),
         theta=theta[np.argsort(theta_tilde)],
         Z=Z[np.argsort(theta_tilde), :],
         Z_tilde=Z_tilde[np.argsort(theta_tilde)],
