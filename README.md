@@ -1,4 +1,4 @@
-# Additive-Covariate Stochastic Block Model (`acsbm`)
+# Additive-Covariate Stochastic Block Model
 
 This code accompanies a paper on a model called the additive-covariate stochastic block model (ACSBM), an extension of the popular stochastic block model. The purpose of this model and the proposed spectral fitting method is to separate observed homophily from latent network structure. For details on the spectral fitting method, please see the paper.
 
@@ -11,4 +11,4 @@ Examples can be found in the [/examples](/examples) directory. In particular:
 
 ## Reproducibility
 
-Simulation code can be found in [`/src/simulator.py`](/src/simulator.py). The included `Dockerfile` can be used to generate a Docker image capable of running all code. This code has been tested on Python 3.10 with the modules listed in `requirements.txt`.
+Simulation code (including settings) can be found in [`/src/simulator.py`](/src/simulator.py). The included `Dockerfile` can be used to generate a Docker image capable of running all code. This code has been tested on Python 3.10 with the modules listed in `requirements.txt`.
