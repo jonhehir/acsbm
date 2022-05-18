@@ -1,6 +1,6 @@
 # Additive-Covariate Stochastic Block Model
 
-This code accompanies a paper on a model called the additive-covariate stochastic block model (ACSBM), an extension of the popular stochastic block model. The purpose of this model and the proposed spectral fitting method is to separate observed homophily from latent network structure. For details on the spectral fitting method, please see the paper.
+This code accompanies a paper [(arXiv:2205.08047)](https://arxiv.org/abs/2205.08047) on a model called the additive-covariate stochastic block model (ACSBM), an extension of the popular stochastic block model. The purpose of this model and the proposed spectral fitting method is to separate observed homophily from latent network structure. For details on the spectral fitting method, please see [the paper](https://arxiv.org/abs/2205.08047).
 
 ## Examples
 
